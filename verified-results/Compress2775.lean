@@ -239,4 +239,65 @@ theorem chain_value (xs : List ℕ) (w : List Bool) (acc : ℕ)
     change (run (chain (w.length+1) w.length xs) w').getD (outputWire (w.length+1) w.length xs) false = _
     simpa only [b, List.any_cons, Bool.or_assoc] using t
 
+-- Operands and unmerged leaves must name actual retained wires.
+theorem rebuild_inputs (n : ℕ) (C : Circuit) (T L : Finset ℕ) (f s : ℕ)
+    (back : ReadsBack n C) (tree : IsOrTree n C T L C.output)
+    (hf : n+f ∈ L) (hs : n+s ∈ L) (different : f ≠ s)
+    (fg : (gateAt C f).op = GateOp.and) (sg : (gateAt C s).op = GateOp.and)
+    (iso : ∀ k < C.gates.length, k ∉ T →
+      n + f ∉ (gateAt C k).inputs ∧ n + s ∉ (gateAt C k).inputs ∧
+      ∀ j ∈ T, n + j ∉ (gateAt C k).inputs) :
+    ∀ w, w ∈ (gateAt C f).inputs ∨ w ∈ (gateAt C s).inputs ∨
+      w ∈ (L.erase (n+f)).erase (n+s) →
+      w < n + C.size ∧ outside n T f s w = true := by
+  have realAnd (j : ℕ) (h : (gateAt C j).op = GateOp.and) : j < C.gates.length := by
+    by_contra hn
+    simp [gateAt, List.getD_eq_getElem?_getD, List.getElem?_eq_none (Nat.le_of_not_gt hn)] at h
+  have operand (j w : ℕ) (h : (gateAt C j).op = GateOp.and) (hw : w ∈ (gateAt C j).inputs) :
+      w < n+C.size ∧ outside n T f s w = true := by
+    have hj := realAnd j h
+    have notTree : j ∉ T := by
+      intro ht
+      have eq := (tree.1 j ht).1
+      rw [h] at eq
+      contradiction
+    obtain ⟨h1,h2,ht⟩ := iso j hj notTree
+    refine ⟨(back j hj w hw).trans (Nat.add_lt_add_left hj n), decide_eq_true ?_⟩
+    by_cases before : w < n
+    · exact Or.inl before
+    · have e : n+(w-n) = w := by omega
+      exact Or.inr ⟨fun mem => ht (w-n) mem (e.symm ▸ hw),
+        fun eq => h1 (eq ▸ hw), fun eq => h2 (eq ▸ hw)⟩
+  intro w hw
+  rcases hw with h | h | leaf
+  · exact operand f w fg h
+  · exact operand s w sg h
+  obtain ⟨ns,h'⟩ := Finset.mem_erase.mp leaf
+  obtain ⟨nf,hl⟩ := Finset.mem_erase.mp h'
+  have detached := (tree.2.1 w hl).1
+  have nonempty : T ≠ ∅ := by
+    intro e
+    have only : L = {C.output} := by simpa [e] using tree.2.2.2
+    rw [only] at hf hs
+    simp only [Finset.mem_singleton] at hf hs
+    omega
+  obtain ⟨root,hr,output⟩ : ∃ j ∈ T, C.output = n+j := by simpa [nonempty] using tree.2.2.2
+  have notRoot : w ≠ C.output := by
+    intro e
+    exact detached (by simp [e,output,hr])
+  have uses : readsIn C T w = 1 := by simpa [notRoot] using (tree.2.1 w hl).2
+  have reader : ∃ j ∈ T, w ∈ (gateAt C j).inputs := by
+    by_contra! none
+    have zero : readsIn C T w = 0 := Finset.sum_eq_zero fun j hj =>
+      List.count_eq_zero_of_not_mem (none j hj)
+    omega
+  obtain ⟨j,hj,hw⟩ := reader
+  have bound : j < C.gates.length := by
+    by_contra hn
+    simp [gateAt, List.getD_eq_getElem?_getD, List.getElem?_eq_none (Nat.le_of_not_gt hn)] at hw
+  refine ⟨(back j bound w hw).trans (Nat.add_lt_add_left bound n), decide_eq_true ?_⟩
+  by_cases before : w < n
+  · exact Or.inl before
+  · exact Or.inr ⟨fun ht => detached ⟨by omega, ht⟩, nf, ns⟩
+
 end Compress2775
