@@ -149,7 +149,7 @@ theorem closed_of_reads (keep : ℕ → Bool) (gs : List Gate) (start : ℕ)
       intro i hi
       obtain ⟨hlt, hkeep⟩ := reads ⟨0, by simp⟩ (by simpa using h) i hi
       have lt : i < start := by simpa using hlt
-      simp [List.getElem?_eq_getElem (show i < ((List.range start).map keep).length by simpa), lt, hkeep]
+      simp [lt, hkeep]
 
 open PEqualNP.MetaComplexity.NestedCover
 
@@ -166,7 +166,7 @@ theorem isolated_closed (n : ℕ) (C : Circuit) (T : Finset ℕ) (first second :
   apply closed_of_reads
   intro j live i hi
   have g : gateAt C j.val = C.gates[j] := by
-    simp [gateAt, List.getD_eq_getElem?_getD, List.getElem?_eq_getElem j.isLt]
+    simp [gateAt, List.getD_eq_getElem?_getD]
   have hj : j.val ∉ T := by
     have h := of_decide_eq_true live
     rcases h with h | ⟨h, _, _⟩
@@ -181,5 +181,62 @@ theorem isolated_closed (n : ℕ) (C : Circuit) (T : Finset ℕ) (first second :
   · have decomp : n + (i - n) = i := by omega
     exact Or.inr ⟨fun ht' => ht (i-n) ht' (decomp.symm ▸ mem),
       fun e => hf (e ▸ mem), fun e => hs (e ▸ mem)⟩
+
+-- Append one OR gate per remaining leaf, starting from the factored wire.
+def chain (start acc : ℕ) : List ℕ → List Gate
+  | [] => []
+  | i :: rest => ⟨GateOp.or, [acc,i]⟩ :: chain (start+1) start rest
+
+def outputWire (start acc : ℕ) : List ℕ → ℕ
+  | [] => acc
+  | _ :: rest => outputWire (start+1) start rest
+
+theorem chain_length (xs : List ℕ) (start acc : ℕ) :
+    (chain start acc xs).length = xs.length := by
+  induction xs generalizing start acc with
+  | nil => rfl
+  | cons i xs ih => simp [chain, ih]
+
+theorem chain_ordered (xs : List ℕ) (start acc : ℕ) (ha : acc < start)
+    (hx : ∀ i ∈ xs, i < start) : orderedAO start (chain start acc xs) := by
+  induction xs generalizing start acc with
+  | nil => trivial
+  | cons i xs ih =>
+    have hi := hx i (by simp)
+    refine ⟨Or.inr rfl, rfl, ?_, ih _ _ (by omega) (fun j hj => ?_)⟩
+    · intro j hj
+      simp only [List.mem_cons, List.not_mem_nil, or_false] at hj
+      rcases hj with rfl | rfl <;> assumption
+    · exact Nat.lt_succ_of_lt (hx j (List.mem_cons_of_mem _ hj))
+
+theorem chain_value (xs : List ℕ) (w : List Bool) (acc : ℕ)
+    (hx : ∀ i ∈ xs, i < w.length) :
+    (run (chain w.length acc xs) w).getD (outputWire w.length acc xs) false =
+      (w.getD acc false || xs.any fun i => w.getD i false) := by
+  induction xs generalizing w acc with
+  | nil => simp [run, chain, outputWire]
+  | cons i xs ih =>
+    let b := w.getD acc false || w.getD i false
+    let w' := w ++ [b]
+    have len : w'.length = w.length + 1 := by simp [w']
+    have stay (j : ℕ) (hj : j ∈ xs) : w'.getD j false = w.getD j false := by
+      have h := hx j (List.mem_cons_of_mem _ hj)
+      simp [w', List.getD_eq_getElem?_getD, List.getElem?_append_left h]
+    have t := ih w' w.length (fun j hj => by
+      rw [len]
+      exact Nat.lt_succ_of_lt (hx j (List.mem_cons_of_mem _ hj)))
+    rw [len] at t
+    have head : w'.getD w.length false = b := by simp [w', List.getD_eq_getElem?_getD]
+    have eq : xs.any (fun j => w'.getD j false) = xs.any (fun j => w.getD j false) := by
+      apply Bool.eq_iff_iff.mpr
+      simp only [List.any_eq_true]
+      constructor <;> rintro ⟨j,hj,h⟩
+      · exact ⟨j,hj,(stay j hj) ▸ h⟩
+      · exact ⟨j,hj,(stay j hj).symm ▸ h⟩
+    rw [head, eq] at t
+    have val : value w ⟨GateOp.or,[acc,i]⟩ = b := by simp [value, GateOp.eval, b]
+    simp only [chain, outputWire, run, List.foldl_cons, val]
+    change (run (chain (w.length+1) w.length xs) w').getD (outputWire (w.length+1) w.length xs) false = _
+    simpa only [b, List.any_cons, Bool.or_assoc] using t
 
 end Compress2775
