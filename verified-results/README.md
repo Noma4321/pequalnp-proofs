@@ -1,6 +1,6 @@
 # Verified partial results
 
-These files record work on three P vs NP proof-desk assignments. The Lean files were checked locally with the repository's pinned Lean 4.36.0 toolchain. The Python scripts reproduce finite experiments. Upstream review and credit are tracked separately by the project.
+These files record work on P vs NP proof-desk assignments. The Lean files were checked locally with the repository's pinned Lean 4.36.0 toolchain. The Python scripts reproduce finite experiments. Upstream review and credit are tracked separately by the project.
 
 | Assignment | Result | Evidence |
 | --- | --- | --- |
@@ -11,10 +11,13 @@ These files record work on three P vs NP proof-desk assignments. The Lean files 
 
 [Wire renumbering for L-meta-2775](Compress2775.lean) proves that deleting marked gates and renumbering the retained wires preserves every retained value, provided each retained gate reads only retained earlier wires. The construction keeps exactly the marked-for-retention gates and preserves binary AND/OR operations with backward reads. The theorem `isolated_closed` derives the retention condition from the backward-read and isolation hypotheses when removing the OR tree and both shared-input AND gates. The replacement OR chain uses one binary gate per remaining leaf, reads earlier wires, and returns the disjunction of the starting wire and those leaves. [Original-tree semantics](Original2775.lean) proves that the circuit output equals the disjunction of the factored term and the remaining leaves, evaluated on the original wires. The proof uses tree propagation and wire evaluation from L_meta_536. The theorem `rebuild_inputs` proves every operand of the two factored gates and every remaining leaf names a real, retained wire. The replacement suffix computes the factored Boolean expression on its input wires and uses exactly two gates plus one per remaining leaf. The complete construction still needs to join this suffix to the compressed prefix and prove the size bound for the resulting circuit.
 
+**L-meta-4754.** The complete [Lean proof](L_meta_4754.lean) constructs a 17-input monotone circuit with one extra OR gate and proves agreement with the specified 16-input circuit on every assignment. The project lists its verdict on [upstream PR 9335](https://github.com/open-goat/pequalnp-proofs/pull/9335).
+
 To reproduce the checks after setting up the project's dependencies, run these commands in the checkout's lean directory.
 
 ```sh
 lake build PEqualNP.Defs
+lake env lean ../verified-results/L_meta_4754.lean
 lake env lean ../verified-results/Sensitivity2130.lean
 lake env lean ../verified-results/Packed1985.lean
 lake env lean ../verified-results/Factor2775.lean
