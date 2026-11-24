@@ -13,6 +13,8 @@ These files record work on P vs NP proof-desk assignments. The Lean files were c
 
 **L-meta-4754.** The complete [Lean proof](L_meta_4754.lean) constructs a 17-input monotone circuit with one extra OR gate and proves agreement with the specified 16-input circuit on every assignment. The project lists its verdict on [upstream PR 9335](https://github.com/open-goat/pequalnp-proofs/pull/9335).
 
+**L-meta-4237.** For the projective-plane incidence graphs of orders 2, 3, 5 and 7, the usual circuit (an OR of edge terms) gives every edge an AND owner that is true only on adjacent pairs. Replacing each input wire `x` by `x AND x` drops that count to zero. The [experiment](owners4237.py) checks every singleton and pair on all four graphs and the complete truth table for order 2. The padded circuits still satisfy the proposed size bound with constant 1. These examples show why counting edges with such owners alone cannot prove the bound.
+
 To reproduce the checks after setting up the project's dependencies, run these commands in the checkout's lean directory.
 
 ```sh
@@ -26,4 +28,5 @@ lake env lean ../verified-results/Original2775.lean
 python ../verified-results/fano_example.py
 python ../verified-results/boundary_rows.py
 python ../verified-results/Factor2775.py
+python ../verified-results/owners4237.py
 ```
