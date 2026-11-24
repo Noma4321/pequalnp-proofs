@@ -9,6 +9,8 @@ These files record work on three P vs NP proof-desk assignments. The Lean files 
 | L-meta-1985 | Evaluating monotone circuits on packed bit vectors agrees at each bit with evaluating the same assignment separately. The Heawood edge function has 21 minimal true assignments and 37 maximal false assignments. The 27-gate lower bound remains open in this work. | [Lean evaluation lemma](Packed1985.lean) and [row enumeration](boundary_rows.py) |
 | L-meta-2775 | Factoring two AND leaves that share an input preserves the OR of the leaves. Given the binary-tree gate count, the rebuilt expression saves one gate. Circuit rewiring passed 216 minimal-shape test cases and 5,000 seeded cases, exhaustively over the inputs of each case. A general Lean proof of rewiring remains open. | [Lean lemmas](Factor2775.lean) and [circuit tests](Factor2775.py) |
 
+[Wire renumbering for L-meta-2775](Compress2775.lean) proves that deleting marked gates and renumbering the retained wires preserves every retained value, provided each retained gate reads only retained earlier wires. The construction keeps exactly the marked-for-retention gates and preserves binary AND/OR operations with backward reads. Applying this construction to the full output-tree rewrite remains open here.
+
 To reproduce the checks after setting up the project's dependencies, run these commands in the checkout's lean directory.
 
 ```sh
@@ -16,6 +18,7 @@ lake build PEqualNP.Defs
 lake env lean ../verified-results/Sensitivity2130.lean
 lake env lean ../verified-results/Packed1985.lean
 lake env lean ../verified-results/Factor2775.lean
+lake env lean ../verified-results/Compress2775.lean
 python ../verified-results/fano_example.py
 python ../verified-results/boundary_rows.py
 python ../verified-results/Factor2775.py
