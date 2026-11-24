@@ -300,4 +300,58 @@ theorem rebuild_inputs (n : ℕ) (C : Circuit) (T L : Finset ℕ) (f s : ℕ)
   · exact Or.inl before
   · exact Or.inr ⟨fun ht => detached ⟨by omega, ht⟩, nf, ns⟩
 
+def suffix (n a b c : ℕ) (leaves : List ℕ) : List Gate :=
+  ⟨GateOp.or,[b,c]⟩ :: ⟨GateOp.and,[a,n]⟩ :: chain (n+2) (n+1) leaves
+
+theorem suffix_length (n a b c : ℕ) (leaves : List ℕ) :
+    (suffix n a b c leaves).length = 2 + leaves.length := by
+  simp [suffix, chain_length] <;> omega
+
+theorem suffix_ordered (n a b c : ℕ) (leaves : List ℕ)
+    (ha : a < n) (hb : b < n) (hc : c < n) (hl : ∀ i ∈ leaves, i < n) :
+    orderedAO n (suffix n a b c leaves) := by
+  refine ⟨Or.inr rfl, rfl, ?_, Or.inl rfl, rfl, ?_, chain_ordered _ _ _ (by omega) ?_⟩
+  · intro i hi
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at hi
+    rcases hi with rfl | rfl <;> assumption
+  · intro i hi
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at hi
+    rcases hi with rfl | rfl <;> omega
+  · intro i hi
+    have := hl i hi
+    omega
+
+theorem suffix_value (w : List Bool) (a b c : ℕ) (leaves : List ℕ)
+    (ha : a < w.length) (hl : ∀ i ∈ leaves, i < w.length) :
+    (run (suffix w.length a b c leaves) w).getD
+      (outputWire (w.length+2) (w.length+1) leaves) false =
+      ((w.getD a false && (w.getD b false || w.getD c false)) ||
+        leaves.any fun i => w.getD i false) := by
+  let u := w.getD b false || w.getD c false
+  let v := w.getD a false && u
+  let w' := (w ++ [u]) ++ [v]
+  have eu : value w ⟨GateOp.or,[b,c]⟩ = u := by simp [value, GateOp.eval, u]
+  have ev : value (w ++ [u]) ⟨GateOp.and,[a,w.length]⟩ = v := by
+    simp [value, GateOp.eval, v, List.getD_eq_getElem?_getD, List.getElem?_append_left ha]
+  have len : w'.length = w.length+2 := by simp [w']
+  have h := chain_value leaves w' (w.length+1) (fun i hi => by
+    rw [len]; have := hl i hi; omega)
+  rw [len] at h
+  have last : w'.getD (w.length+1) false = v := by
+    change ((w ++ [u]) ++ [v]).getD (w.length+1) false = v
+    rw [show w.length+1 = (w ++ [u]).length by simp]
+    simp [List.getD_eq_getElem?_getD]
+  have eq : leaves.any (fun i => w'.getD i false) = leaves.any (fun i => w.getD i false) := by
+    apply Bool.eq_iff_iff.mpr
+    simp only [List.any_eq_true]
+    have atLeaf (i : ℕ) (hi : i ∈ leaves) : w'.getD i false = w.getD i false := by
+      have l := hl i hi
+      have l' : i < (w ++ [u]).length := by simp; omega
+      simp only [w', List.getD_eq_getElem?_getD, List.getElem?_append_left l', List.getElem?_append_left l]
+    constructor <;> rintro ⟨i,hi,hv⟩
+    · exact ⟨i,hi,(atLeaf i hi) ▸ hv⟩
+    · exact ⟨i,hi,(atLeaf i hi).symm ▸ hv⟩
+  rw [last,eq] at h
+  simpa only [suffix, run, List.foldl_cons, eu, ev, w', v, u] using h
+
 end Compress2775
