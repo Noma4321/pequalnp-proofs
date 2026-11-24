@@ -1,4 +1,4 @@
-import PEqualNP.Defs.CircuitLowerBounds
+import PEqualNP.Defs.NestedCoverCircuit
 
 namespace Compress2775
 
@@ -123,5 +123,63 @@ theorem compile_ordered (gs : List (Bool × Gate)) (ks : List Bool) (safe : clos
         obtain ⟨j,hj,rfl⟩ := List.mem_map.mp hi
         exact rank_lt ks j (safe.1 j hj)
       · simpa using ih (ks ++ [true]) safe.2 tail
+
+def tag (keep : ℕ → Bool) (start : ℕ) : List Gate → List (Bool × Gate)
+  | [] => []
+  | g :: gs => (keep start, g) :: tag keep (start + 1) gs
+
+theorem closed_of_reads (keep : ℕ → Bool) (gs : List Gate) (start : ℕ)
+    (reads : ∀ j : Fin gs.length, keep (start + j.val) = true →
+      ∀ i ∈ gs[j].inputs, i < start + j.val ∧ keep i = true) :
+    closed ((List.range start).map keep) (tag keep start gs) := by
+  induction gs generalizing start with
+  | nil => trivial
+  | cons g gs ih =>
+    have tail (j : Fin gs.length) (hj : keep (start + 1 + j.val) = true) :
+        ∀ i ∈ gs[j].inputs, i < start + 1 + j.val ∧ keep i = true := by
+      simpa [Nat.add_assoc, Nat.add_comm 1] using
+        reads j.succ (by simpa [Nat.add_assoc, Nat.add_comm 1] using hj)
+    have next := ih (start + 1) tail
+    rw [List.range_succ, List.map_append, List.map_singleton] at next
+    cases h : keep start with
+    | false => simpa [tag, h, closed] using next
+    | true =>
+      simp only [tag, h, closed]
+      refine ⟨?_, by simpa [h] using next⟩
+      intro i hi
+      obtain ⟨hlt, hkeep⟩ := reads ⟨0, by simp⟩ (by simpa using h) i hi
+      have lt : i < start := by simpa using hlt
+      simp [List.getElem?_eq_getElem (show i < ((List.range start).map keep).length by simpa), lt, hkeep]
+
+open PEqualNP.MetaComplexity.NestedCover
+
+def outside (n : ℕ) (T : Finset ℕ) (first second w : ℕ) : Bool :=
+  decide (w < n ∨ (w - n ∉ T ∧ w ≠ n + first ∧ w ≠ n + second))
+
+theorem isolated_closed (n : ℕ) (C : Circuit) (T : Finset ℕ) (first second : ℕ)
+    (back : ReadsBack n C)
+    (iso : ∀ k < C.gates.length, k ∉ T →
+      n + first ∉ (gateAt C k).inputs ∧ n + second ∉ (gateAt C k).inputs ∧
+      ∀ j ∈ T, n + j ∉ (gateAt C k).inputs) :
+    closed ((List.range n).map (outside n T first second))
+      (tag (outside n T first second) n C.gates) := by
+  apply closed_of_reads
+  intro j live i hi
+  have g : gateAt C j.val = C.gates[j] := by
+    simp [gateAt, List.getD_eq_getElem?_getD, List.getElem?_eq_getElem j.isLt]
+  have hj : j.val ∉ T := by
+    have h := of_decide_eq_true live
+    rcases h with h | ⟨h, _, _⟩
+    · omega
+    · simpa using h
+  have mem : i ∈ (gateAt C j.val).inputs := g ▸ hi
+  obtain ⟨hf, hs, ht⟩ := iso j.val j.isLt hj
+  refine ⟨back j.val j.isLt i mem, ?_⟩
+  apply decide_eq_true
+  by_cases h : i < n
+  · exact Or.inl h
+  · have decomp : n + (i - n) = i := by omega
+    exact Or.inr ⟨fun ht' => ht (i-n) ht' (decomp.symm ▸ mem),
+      fun e => hf (e ▸ mem), fun e => hs (e ▸ mem)⟩
 
 end Compress2775
