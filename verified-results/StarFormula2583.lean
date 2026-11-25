@@ -401,4 +401,73 @@ theorem incidence_read_one {N : Nat} (I : Fin N → Fin N → Prop) [DecidableRe
   simp at contra
   omega
 
+private theorem uniform_or {A V : Type} (f : A → Tree V) (xs : List A) (ne : xs ≠ [])
+    (d : Nat) (size : ∀ a ∈ xs, cost (f a) = d) :
+    ∃ t, cost t + 1 = xs.length * (d+1) ∧
+      (∀ x, eval x t = true ↔ ∃ a ∈ xs, eval x (f a) = true) ∧
+      (∀ a ∈ xs, ∀ vs, Trace (f a) vs → Trace t vs) := by
+  induction xs with
+  | nil => exact (ne rfl).elim
+  | cons a xs ih =>
+    by_cases empty : xs = []
+    · subst xs
+      refine ⟨f a, by simp [size], ?_, ?_⟩
+      · simp
+      · simp
+    · obtain ⟨tail, count, val, traces⟩ := ih empty (fun b hb => size b (by simp [hb]))
+      refine ⟨.either (f a) tail, ?_, ?_, ?_⟩
+      · simp only [cost, List.length_cons, Nat.add_mul, Nat.one_mul]
+        have h := size a (by simp)
+        omega
+      · intro x
+        simp [eval, val]
+      · intro b hb vs tr
+        rcases List.mem_cons.mp hb with e | m
+        · subst b; exact .left tr
+        · exact .right (traces b m vs tr)
+
+theorem incidence_star_tree (N q : Nat) (hN : 0 < N) (I : Fin N → Fin N → Prop)
+    [DecidableRel I] (degree : ∀ l, (Finset.univ.filter (fun p => I p l)).card = q+1) :
+    ∃ t : Tree (Fin (N+N)), cost t + 1 = N * (q+2) ∧
+      (∀ z, eval z t = decide (∃ p l, I p l ∧ z (Fin.castAdd N p) = true ∧ z (Fin.natAdd N l) = true)) ∧
+      (∀ p l, I p l → Trace t [Fin.castAdd N p, Fin.natAdd N l]) := by
+  classical
+  have line (l : Fin N) : ∃ t : Tree (Fin (N+N)), cost t = q+1 ∧
+      (∀ z, eval z t = true ↔ ∃ p, I p l ∧ z (Fin.castAdd N p) = true ∧ z (Fin.natAdd N l) = true) ∧
+      (∀ p, I p l → Trace t [Fin.castAdd N p, Fin.natAdd N l]) := by
+    let ps := (Finset.univ.filter (fun p => I p l)).toList
+    have len : ps.length = q+1 := by simpa [ps] using degree l
+    have mem (p : Fin N) : p ∈ ps ↔ I p l := by simp [ps]
+    obtain ⟨r, count, val, tr⟩ := uniform_or
+      (fun p : Fin N => Tree.input (Fin.castAdd N p)) ps (by intro e; simp [e] at len)
+      0 (fun _ _ => rfl)
+    refine ⟨.both r (.input (Fin.natAdd N l)), ?_, ?_, ?_⟩
+    · simpa [cost, len] using count
+    · intro z
+      simp [eval, val, mem]
+      exact ⟨fun ⟨⟨p,h,hp⟩,hl⟩ => ⟨p,h,hp,hl⟩, fun ⟨p,h,hp,hl⟩ => ⟨⟨p,h,hp⟩,hl⟩⟩
+    · intro p hp
+      exact Trace.join (tr p ((mem p).mpr hp) _ (.leaf _)) (.leaf _)
+  choose f size val traces using line
+  obtain ⟨t,count,truth,tr⟩ := uniform_or f (List.finRange N)
+    (by intro e; have := congrArg List.length e; simp_all) (q+1) (fun a _ => size a)
+  refine ⟨t, by simpa using count, ?_, ?_⟩
+  · intro z
+    apply Bool.eq_iff_iff.mpr
+    simp only [truth, List.mem_finRange, true_and, val, decide_eq_true_eq]
+    exact ⟨fun ⟨l,p,h⟩ => ⟨p,l,h⟩, fun ⟨p,l,h⟩ => ⟨l,p,h⟩⟩
+  · intro p l inc
+    exact tr l (by simp) _ (traces l p inc)
+
+theorem replacement_of_budget {N q : Nat} (hN : 0 < N) (I : Fin N → Fin N → Prop)
+    [DecidableRel I] (degree : ∀ l, (Finset.univ.filter (fun p => I p l)).card = q+1)
+    (C : Circuit) (budget : N*(q+2) ≤ C.size+1) :
+    ∃ D : Circuit, PEqualNP.TopForm.IsAO2 (N+N) D ∧
+      (∀ z, PEqualNP.MetaComplexity.circuitFun (N+N) D z = decide
+        (∃ p l, I p l ∧ z (Fin.castAdd N p) = true ∧ z (Fin.natAdd N l) = true)) ∧
+      D.size ≤ C.size ∧ IsReadK (N+N) D 1 := by
+  obtain ⟨t, count, value, traces⟩ := incidence_star_tree N q hN I degree
+  exact ⟨circuit t, circuit_ao2 t, fun z => (circuit_value z t).trans (value z),
+    by rw [circuit_size]; omega, incidence_read_one I t value traces⟩
+
 end VerifiedResults.StarFormula
