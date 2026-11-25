@@ -2,6 +2,8 @@ import Mathlib.Algebra.Polynomial.RuleOfSigns
 import Mathlib.Basic.Real.Basic
 import Mathlib.Tactic.Linarith
 import Mathlib.Tactic.Ring
+import Mathlib.Tactic.ComputeDegree
+import Mathlib.Tactic.FieldSimp
 
 open Polynomial
 
@@ -92,5 +94,94 @@ theorem zero_sum_three_cubes (a b c : Polynomial ℝ) (h : a+b+c = 0)
   have bb := sparse_bound b
   have bc := sparse_bound c
   omega
+
+private theorem pencil_chart (a b : Polynomial ℝ) (u v : ℝ)
+    (ha : a.support.card ≤ 4) (hb : b.support.card ≤ 4) (lead : 1+u^3 ≠ 0) :
+    (positive (a^3+b^3+(C u*a+C v*b)^3)).card ≤ 21 := by
+  classical
+  let P := a^3+b^3+(C u*a+C v*b)^3
+  change (positive P).card ≤ 21
+  by_cases dep : ∃ t : ℝ, a = C t*b
+  · obtain ⟨t, ht⟩ := dep
+    have id : P = C (t^3+1+(u*t+v)^3)*b^3 := by simp [P,ht]; ring
+    rw [id]
+    have c := product_bound (C (t^3+1+(u*t+v)^3)) (b^3)
+    have constant (k : ℝ) : (positive (C k)).card = 0 := by simp [positive]
+    have z := constant (t^3+1+(u*t+v)^3)
+    have r : positive (b^3) = positive b := by simp [positive, roots_pow]
+    rw [r,z] at c
+    have s := sparse_bound b
+    omega
+  let Q : Polynomial ℝ := C (1+u^3)*X^3 + C (3*u^2*v)*X^2 +
+    C (3*u*v^2)*X + C (1+v^3)
+  have deg : Q.natDegree = 3 := by unfold Q; compute_degree!
+  have nz : Q ≠ 0 := by intro h; simp [h] at deg
+  let R := Q.roots.toFinset
+  let dirs : Finset ℝ := if R.Nonempty then R else {0}
+  have nonempty : dirs.Nonempty := by by_cases h : R.Nonempty <;> simp [dirs,h]
+  have incl : R ⊆ dirs := by by_cases h : R.Nonempty <;> simp_all [dirs, Finset.not_nonempty_iff_eq_empty]
+  have num : dirs.card ≤ 3 := by
+    have := (Multiset.toFinset_card_le Q.roots).trans Q.card_roots'
+    by_cases h : R.Nonempty <;> simp_all [dirs,R]
+  let fiber (t : ℝ) := positive (a-C t*b)
+  have small (t : ℝ) : (fiber t).card ≤ 7 := by
+    have sub : (a-C t*b).support ⊆ a.support ∪ b.support := by
+      intro i hi
+      contrapose hi
+      simp only [Finset.mem_union,not_or,Polynomial.notMem_support_iff] at hi
+      simp [coeff_C_mul,hi]
+    have := (Finset.card_le_card sub).trans (Finset.card_union_le ..)
+    have := sparse_bound (a-C t*b)
+    dsimp [fiber]; omega
+  have cover : positive P ⊆ dirs.biUnion fiber := by
+    intro x hx
+    obtain ⟨hm,pos⟩ := Finset.mem_filter.mp hx
+    have eq := Polynomial.isRoot_of_mem_roots (Multiset.mem_toFinset.mp hm)
+    change P.eval x = 0 at eq
+    simp only [P,eval_add,eval_pow,eval_mul,eval_C] at eq
+    have put (t : ℝ) (ht : t ∈ dirs) (h : a.eval x = t*b.eval x) :
+        x ∈ dirs.biUnion fiber := by
+      apply Finset.mem_biUnion.mpr
+      refine ⟨t,ht,Finset.mem_filter.mpr ⟨Multiset.mem_toFinset.mpr
+        ((Polynomial.mem_roots (sub_ne_zero.mpr (fun e => dep ⟨t,e⟩))).mpr ?_),pos⟩⟩
+      change (a-C t*b).eval x = 0
+      simp [h]
+    by_cases by0 : b.eval x = 0
+    · have mul : (1+u^3)*(a.eval x)^3 = 0 := by rw [by0] at eq; linarith only [eq]
+      have ax : a.eval x = 0 := by simpa using (mul_eq_zero.mp mul).resolve_left lead
+      obtain ⟨t,ht⟩ := nonempty
+      exact put t ht (by simp [ax,by0])
+    · let t := a.eval x / b.eval x
+      have ax : a.eval x = t*b.eval x := (div_mul_cancel₀ _ by0).symm
+      apply put t _ ax
+      apply incl
+      apply Multiset.mem_toFinset.mpr
+      apply (Polynomial.mem_roots nz).mpr
+      change Q.eval t = 0
+      simp only [Q,eval_add,eval_C,eval_mul,eval_X,eval_pow]
+      dsimp [t]
+      field_simp
+      linarith only [eq]
+  calc
+    _ ≤ _ := Finset.card_le_card cover
+    _ ≤ ∑ t ∈ dirs, (fiber t).card := Finset.card_biUnion_le
+    _ ≤ ∑ _t ∈ dirs, 7 := Finset.sum_le_sum (fun t _ => small t)
+    _ ≤ 21 := by simp; omega
+
+theorem dependent_three_cubes (a b c : Polynomial ℝ) (u v : ℝ)
+    (rel : c = C u*a + C v*b)
+    (ha : a.support.card ≤ 4) (hb : b.support.card ≤ 4) (hc : c.support.card ≤ 4) :
+    (positive (a^3+b^3+c^3)).card ≤ 21 := by
+  by_cases hu : 1+u^3 ≠ 0
+  · rw [rel]; exact pencil_chart a b u v ha hb hu
+  by_cases hv : 1+v^3 ≠ 0
+  · simpa only [rel, add_comm (a^3), add_comm (C u*a)] using
+      (pencil_chart b a v u hb ha hv)
+  have neg (z : ℝ) (h : ¬ 1+z^3 ≠ 0) : z = -1 := by
+    apply (Odd.strictMono_pow (by decide : Odd 3)).injective
+    simp only [not_not] at h
+    linarith
+  have sum0 : a+b+c = 0 := by rw [rel,neg u hu,neg v hv]; simp; ring
+  exact (zero_sum_three_cubes a b c sum0 ha hb hc).trans (by decide)
 
 end VerifiedResults.CubicRoots
