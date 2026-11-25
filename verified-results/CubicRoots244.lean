@@ -4,6 +4,7 @@ import Mathlib.Tactic.Linarith
 import Mathlib.Tactic.Ring
 import Mathlib.Tactic.ComputeDegree
 import Mathlib.Tactic.FieldSimp
+import Mathlib.Data.Sym.Card
 
 open Polynomial
 
@@ -183,5 +184,44 @@ theorem dependent_three_cubes (a b c : Polynomial ℝ) (u v : ℝ)
     linarith
   have sum0 : a+b+c = 0 := by rw [rel,neg u hu,neg v hv]; simp; ring
   exact (zero_sum_three_cubes a b c sum0 ha hb hc).trans (by decide)
+
+private theorem exponent_split {a b : Polynomial ℝ} {k : ℕ} (h : k ∈ (a*b).support) :
+    ∃ i ∈ a.support, ∃ j ∈ b.support, i+j=k := by
+  have hn := Polynomial.mem_support_iff.mp h
+  rw [coeff_mul] at hn
+  obtain ⟨p,mp,nonzero⟩ := Finset.exists_ne_zero_of_sum_ne_zero hn
+  exact ⟨p.1, Polynomial.mem_support_iff.mpr (left_ne_zero_of_mul nonzero),
+    p.2, Polynomial.mem_support_iff.mpr (right_ne_zero_of_mul nonzero),
+    Finset.mem_antidiagonal.mp mp⟩
+
+-- No bound on the exponents themselves is required.
+theorem four_common_exponents (e : Fin 4 → ℕ) (s : Fin 3 → ℝ)
+    (g : Fin 3 → Polynomial ℝ) (h : ∀ i k, k ∈ (g i).support → ∃ j, e j = k) :
+    (positive (∑ i, C (s i)*(g i)^3)).card ≤ 19 := by
+  classical
+  let total (u : Sym (Fin 4) 3) := (u.val.map e).sum
+  let exps := Finset.univ.image total
+  have count : exps.card ≤ 20 := by
+    have up := Finset.card_image_le (f := total) (s := Finset.univ)
+    have num : Nat.multichoose 4 3 = 20 := by rw [Nat.multichoose_eq]; decide
+    simpa [exps, Sym.card_sym_fin_eq_multichoose, num] using up
+  have subset : (∑ i, C (s i)*(g i)^3).support ⊆ exps := by
+    intro k hk
+    have nonzero := Polynomial.mem_support_iff.mp hk
+    rw [finsetSum_coeff] at nonzero
+    obtain ⟨i,_,v⟩ := Finset.exists_ne_zero_of_sum_ne_zero nonzero
+    rw [coeff_C_mul] at v
+    have cub := Polynomial.mem_support_iff.mpr (right_ne_zero_of_mul v)
+    rw [pow_succ, pow_two] at cub
+    obtain ⟨t,ht,r,hr,rfl⟩ := exponent_split cub
+    obtain ⟨p,hp,q,hq,rfl⟩ := exponent_split ht
+    obtain ⟨P,rfl⟩ := h i p hp
+    obtain ⟨Q,rfl⟩ := h i q hq
+    obtain ⟨R,rfl⟩ := h i r hr
+    let u : Sym (Fin 4) 3 := ⟨{P,Q,R},by simp⟩
+    exact Finset.mem_image.mpr ⟨u,Finset.mem_univ _, by simp [total,u,Nat.add_assoc]⟩
+  have sup := (Finset.card_le_card subset).trans count
+  have := sparse_bound (∑ i, C (s i)*(g i)^3)
+  omega
 
 end VerifiedResults.CubicRoots
