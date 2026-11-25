@@ -6,6 +6,9 @@ The target uses the six input bits in little-endian order.
 
 from functools import lru_cache
 from itertools import combinations
+import json
+from pathlib import Path
+import sys
 
 
 TARGET = (4008373994 << 32) + 4008372360
@@ -110,7 +113,32 @@ def monotone_witness(target, budget):
     return gates
 
 
-if __name__ == "__main__":
+def verify_record(record):
+    """Replay numbered gates and exhaust the recorded lower-bound budget."""
+    high, low = record["high32"], record["low32"]
+    if not (0 <= high < 2**32 and 0 <= low < 2**32):
+        raise ValueError("each half of a table must be an unsigned 32-bit integer")
+    target = (high << 32) | low
+    wires = list(INPUTS)
+    for op, i, j in record["gates"]:
+        if op not in ("and", "or") or not (0 <= i < len(wires) and 0 <= j < len(wires)):
+            raise ValueError("invalid monotone gate")
+        wires.append(wires[i] & wires[j] if op == "and" else wires[i] | wires[j])
+    if wires[-1] != target:
+        raise AssertionError("witness disagrees with the six-input table")
+    upper = len(record["gates"])
+    lower = record["excluded_binary_gates"]
+    if lower not in (upper - 2, upper - 1) or check(target, lower):
+        raise AssertionError("free-inversion search did not certify the claimed bound")
+    result = (f"minimum {upper} in both models" if lower == upper - 1 else
+              f"every smaller circuit computing the table uses only AND and OR")
+    print(f'{record["step"]}: {upper} monotone gates, all 64 rows checked; {result}')
+
+
+if __name__ == "__main__" and len(sys.argv) > 1:
+    for name in sys.argv[1:]:
+        verify_record(json.loads(Path(name).read_text(encoding="utf-8")))
+elif __name__ == "__main__":
     if witness(*INPUTS) != TARGET:
         raise AssertionError("the monotone circuit disagrees with the table")
     if check(1 << 63, 4) or not check(1 << 63, 5):
