@@ -30,8 +30,9 @@ def normalized(wire):
     return wire ^ MASK if wire & 1 else wire
 
 
-def check(target, budget):
-    goal = normalized(target)
+def synthesis_path(target, budget, *, monotone=False):
+    """Return successive (operand table, operand table, result table) triples."""
+    goal = target if monotone else normalized(target)
     pairs = [(i, j) for i in range(64) if target >> i & 1
              for j in range(64) if not (target >> j & 1)]
     required = (1 << len(pairs)) - 1
@@ -50,22 +51,25 @@ def check(target, budget):
     @lru_cache(maxsize=65536)
     def reachable(wires, remaining):
         if goal in wires:
-            return True
+            return ()
         if not remaining or len(wires) > remaining + 1 or not separated(wires):
-            return False
+            return None
         for i, j in combinations(range(len(wires)), 2):
             a, b = wires[i], wires[j]
             rest = tuple(x for k, x in enumerate(wires) if k != i and k != j)
-            for z in {normalized(x & y) for x in (a, a ^ MASK) for y in (b, b ^ MASK)}:
+            choices = ((a & b, a | b) if monotone else
+                       {normalized(x & y) for x in (a, a ^ MASK) for y in (b, b ^ MASK)})
+            for z in choices:
                 if z == 0 or z in wires:
                     continue
                 for kept in ((), (a,), (b,), (a, b)):
                     if len(rest) + len(kept) + 1 > remaining:
                         continue
                     after = tuple(sorted((*rest, *kept, z)))
-                    if reachable(after, remaining - 1):
-                        return True
-        return False
+                    tail = reachable(after, remaining - 1)
+                    if tail is not None:
+                        return ((a, b, z), *tail)
+        return None
 
     # Use the connected output cone of a least circuit and discard each
     # operand just after its final use. Essential inputs all start live.
@@ -80,6 +84,30 @@ def check(target, budget):
     assert all(any(((target >> r) ^ (target >> (r ^ (1 << i)))) & 1
                    for r in range(64)) for i in range(6))
     return reachable(tuple(sorted(INPUTS)), budget)
+
+
+def check(target, budget):
+    return synthesis_path(target, budget) is not None
+
+
+def monotone_witness(target, budget):
+    """Convert a synthesized path to ordinary numbered gates and replay every row."""
+    path = synthesis_path(target, budget, monotone=True)
+    if path is None:
+        return None
+    indices = {table: i for i, table in enumerate(INPUTS)}
+    gates = []
+    for a, b, z in path:
+        op = "and" if z == a & b else "or"
+        gates.append((op, indices[a], indices[b]))
+        indices[z] = 6 + len(gates) - 1
+    for row in range(64):
+        values = [bool(row & (1 << i)) for i in range(6)]
+        for op, i, j in gates:
+            values.append((values[i] and values[j]) if op == "and" else (values[i] or values[j]))
+        if values[indices[target]] != bool(target & (1 << row)):
+            raise AssertionError("synthesized circuit failed replay")
+    return gates
 
 
 if __name__ == "__main__":
