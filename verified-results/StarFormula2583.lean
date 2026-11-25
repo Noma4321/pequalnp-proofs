@@ -1,5 +1,6 @@
 import Mathlib.Data.List.Basic
 import PEqualNP.Defs.TopForm
+import PEqualNP.Defs.ReadK
 
 namespace VerifiedResults.StarFormula
 
@@ -225,5 +226,179 @@ theorem circuit_value (x : Fin n → Bool) (t : Tree (Fin n)) :
   intro i
   rw [List.getD_eq_getElem _ _ (by simp)]
   simp
+
+open PEqualNP.ReadK
+private abbrev Vectors := List (List Nat)
+private def vop (S : List Nat) (op : GateOp) (ins : List Vectors) : Vectors :=
+  match op with
+  | .or => ins.foldl (fun acc a => a.foldl insertNew acc) []
+  | .and => ins.foldl (andStep 1) [S.map fun _ => 0]
+  | _ => []
+private def vstep (S : List Nat) (w : List Vectors) (g : Gate) :=
+  w ++ [vop S g.op (g.inputs.map fun i => w.getD i [])]
+private def treeVectors (S : List Nat) (x : Fin n → Vectors) : Tree (Fin n) → Vectors
+  | .input i => x i
+  | .either a b => vop S .or [treeVectors S x a, treeVectors S x b]
+  | .both a b => vop S .and [treeVectors S x a, treeVectors S x b]
+
+private theorem vector_ext (S : List Nat) (gs : List Gate) (w : List Vectors) :
+    ∃ s, gs.foldl (vstep S) w = w ++ s ∧ s.length = gs.length := by
+  induction gs generalizing w with
+  | nil => exact ⟨[], by simp, rfl⟩
+  | cons g gs ih =>
+    obtain ⟨s, eq, len⟩ := ih (vstep S w g)
+    exact ⟨_ :: s, by simpa [vstep, List.append_assoc] using eq, by simp [len]⟩
+
+private theorem vector_keep (w s : List Vectors) (i : Nat) (h : i < w.length) :
+    (w ++ s).getD i [] = w.getD i [] := by
+  simp [List.getElem?_append_left h]
+
+private theorem last_vector (S : List Nat) (w : List Vectors) (g : Gate) :
+    (vstep S w g).getD w.length [] = vop S g.op (g.inputs.map fun i => w.getD i []) := by
+  simp [vstep]
+
+private theorem vector_run (S : List Nat) (x : Fin n → Vectors) (t : Tree (Fin n)) (w : List Vectors)
+    (base : Nat) (len : w.length = base) (enough : n ≤ base)
+    (inputs : ∀ i : Fin n, w.getD i.val [] = x i) :
+    ((emit base t).foldl (vstep S) w).getD (rootWire base t) [] = treeVectors S x t := by
+  induction t generalizing w base with
+  | input i => exact inputs i
+  | either a b ha hb | both a b ha hb =>
+    let wa := (emit base a).foldl (vstep S) w
+    let wb := (emit (base + cost a) b).foldl (vstep S) wa
+    obtain ⟨sa, ea, la⟩ := vector_ext S (emit base a) w
+    obtain ⟨sb, eb, lb⟩ := vector_ext S (emit (base + cost a) b) wa
+    change wa = w ++ sa at ea
+    change wb = wa ++ sb at eb
+    have lena : wa.length = base + cost a := by rw [ea, List.length_append, la, emit_length, len]
+    have lenb : wb.length = base + cost a + cost b := by rw [eb, List.length_append, lb, emit_length, lena]
+    have va := ha w base len enough inputs
+    change wa.getD _ _ = _ at va
+    have left : wb.getD (rootWire base a) [] = treeVectors S x a := by
+      rw [eb, vector_keep, va]
+      rw [lena]; exact root_bound a enough
+    have right := hb wa (base + cost a) lena (by omega) (fun i => by
+      rw [ea, vector_keep, inputs]; omega)
+    change wb.getD _ _ = _ at right
+    simp only [emit, List.foldl_append, List.foldl_cons, List.foldl_nil]
+    change (vstep S wb _).getD (base + cost a + cost b) [] = _
+    rw [← lenb, last_vector]
+    simp only [List.map_cons, List.map_nil, left, right, treeVectors]
+
+private theorem union_mem (v : List Nat) (xs ys : Vectors) :
+    v ∈ xs.foldl insertNew ys ↔ v ∈ ys ∨ v ∈ xs := by
+  have one (a : List Nat) (acc : Vectors) : v ∈ insertNew acc a ↔ v ∈ acc ∨ v = a := by
+    by_cases h : a ∈ acc
+    · simp [insertNew, h, or_iff_left_of_imp (fun (e : v = a) => e.symm ▸ h)]
+    · simp [insertNew, h]
+  induction xs generalizing ys with
+  | nil => simp
+  | cons a xs ih => simp [ih, one, or_assoc]
+
+private theorem product_mem (u v : List Nat) {A B : Vectors}
+    (hu : u ∈ A) (hv : v ∈ B) : capAdd 1 u v ∈ andStep 1 A B := by
+  unfold andStep
+  apply (union_mem ..).mpr
+  exact Or.inr (List.mem_flatMap.mpr ⟨u,hu,List.mem_map.mpr ⟨v,hv,rfl⟩⟩)
+
+private def counts (S vs : List Nat) := S.map fun i => min (vs.count i) 2
+
+private theorem count_join (S a b : List Nat) :
+    capAdd 1 (counts S a) (counts S b) = counts S (a ++ b) := by
+  induction S with
+  | nil => rfl
+  | cons i S ih =>
+    change _ :: capAdd 1 (counts S a) (counts S b) = _ :: counts S (a ++ b)
+    congr 1
+    · simp only [List.count_append]; omega
+
+private theorem trace_vector {t : Tree (Fin n)} {vs : List (Fin n)} (tr : Trace t vs)
+    (S : List Nat) (members : ∀ i ∈ vs, i.val ∈ S) :
+    counts S (vs.map Fin.val) ∈ treeVectors S (fun i => leafVectors S 1 i.val) t := by
+  induction tr with
+  | leaf i =>
+    have hi := members i (by simp)
+    simp only [treeVectors, leafVectors, hi, ↓reduceIte, counts, List.map_cons, List.map_nil,
+      List.mem_singleton]
+    apply List.map_congr_left
+    intro j _
+    by_cases eq : j = i.val
+    · simp [eq]
+    · simp [eq, Ne.symm eq]
+  | left _ ih =>
+    simpa [treeVectors, vop, union_mem] using
+      (Or.inl (ih members) : _ ∨ _)
+  | right _ ih =>
+    simpa [treeVectors, vop, union_mem] using
+      (Or.inr (ih members) : _ ∨ _)
+  | @join a vs b ws ta tb ha hb =>
+    have va := ha (fun i hi => members i (List.mem_append_left _ hi))
+    have vb := hb (fun i hi => members i (List.mem_append_right _ hi))
+    have z : counts S [] ∈ [S.map fun _ => 0] := by simp [counts]
+    have p := product_mem _ _ (product_mem _ _ z va) vb
+    simpa [treeVectors, vop, count_join, List.map_append] using p
+
+theorem compiled_reads_once {t : Tree (Fin n)} {vs : List (Fin n)}
+    (tr : Trace t vs) (S : List Nat) (members : ∀ i ∈ vs, i.val ∈ S)
+    (once : ∀ i ∈ S, (vs.map Fin.val).count i ≤ 1) :
+    readsAtMost (circuit t) n S 1 = true := by
+  apply List.any_eq_true.mpr
+  refine ⟨counts S (vs.map Fin.val), ?_, ?_⟩
+  · have eq := vector_run S (fun i : Fin n => leafVectors S 1 i.val) t
+      ((List.range n).map (leafVectors S 1)) n (by simp) (Nat.le_refl _)
+      (fun i => by rw [List.getD_eq_getElem _ _ (by simp)]; simp)
+    change _ ∈ ((emit n t).foldl (vstep S) _).getD (rootWire n t) []
+    rw [eq]
+    exact trace_vector tr S members
+  · apply List.all_eq_true.mpr
+    intro v hv
+    obtain ⟨i, hi, rfl⟩ := List.mem_map.mp hv
+    exact decide_eq_true ((Nat.min_le_left _ _).trans (once i hi))
+
+theorem compiled_edge {t : Tree (Fin n)} {u v : Fin n} (different : u ≠ v)
+    (tr : Trace t [u,v]) :
+    readsAtMost (circuit t) n (setList {u,v}) 1 = true := by
+  apply compiled_reads_once tr
+  · intro i hi
+    apply List.mem_map.mpr
+    refine ⟨i, List.mem_filter.mpr ⟨by simp, ?_⟩, rfl⟩
+    simpa using hi
+  · intro i _
+    have ne : u.val ≠ v.val := fun h => different (Fin.ext h)
+    by_cases hu : u.val = i <;> by_cases hv : v.val = i <;>
+      simp_all
+
+theorem incidence_read_one {N : Nat} (I : Fin N → Fin N → Prop) [DecidableRel I]
+    (t : Tree (Fin (N+N)))
+    (value : ∀ z, eval z t = decide (∃ p l, I p l ∧
+      z (Fin.castAdd N p) = true ∧ z (Fin.natAdd N l) = true))
+    (traces : ∀ p l, I p l → Trace t [Fin.castAdd N p, Fin.natAdd N l]) :
+    IsReadK (N+N) (circuit t) 1 := by
+  intro S prime
+  have spec (U : Finset (Fin (N+N))) :
+      PEqualNP.MetaComplexity.circuitFun (N+N) (circuit t) (setInput U) =
+        decide (∃ p l, I p l ∧ setInput U (Fin.castAdd N p) = true ∧
+          setInput U (Fin.natAdd N l) = true) :=
+    (circuit_value _ _).trans (value _)
+  obtain ⟨onS, minimal⟩ := prime
+  rw [spec] at onS
+  obtain ⟨p,l,h, hp,hl⟩ := of_decide_eq_true onS
+  let E : Finset (Fin (N+N)) := {Fin.castAdd N p, Fin.natAdd N l}
+  have sub : E ⊆ S := by
+    intro i hi
+    rcases Finset.mem_insert.mp hi with e | e
+    · exact e ▸ of_decide_eq_true hp
+    · exact (Finset.mem_singleton.mp e) ▸ of_decide_eq_true hl
+  have eq : E = S := by
+    by_contra ne
+    have off := minimal E (Finset.mem_ssubsets.mpr (ssubset_of_subset_of_ne sub ne))
+    rw [spec] at off
+    exact (of_decide_eq_false off) ⟨p,l,h, by simp [E, setInput], by simp [E, setInput]⟩
+  rw [← eq]
+  apply compiled_edge _ (traces p l h)
+  intro eq
+  have contra := congrArg Fin.val eq
+  simp at contra
+  omega
 
 end VerifiedResults.StarFormula
