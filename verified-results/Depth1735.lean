@@ -390,7 +390,7 @@ theorem trace_prefix {n D : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj]
         | zero =>
           refine ⟨∅,∅,by simp,by simp,by simp [Facts],?_⟩
           intro u v _ hit
-          simpa [trace_at_gate _ hi hp hq,ha,eq] using hit
+          simp [trace_at_gate _ hi hp hq,ha,eq] at hit
         | succ m =>
           have hm : m ≤ D := by omega
           obtain ⟨P,hP⟩ := prev p hp m hm
@@ -456,6 +456,65 @@ theorem trace_union {n D : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj]
       Bool.false_or, decide_eq_true_eq, x] at yes
     obtain ⟨a,b,hab,ha,hb⟩ := yes
     exact hi a ha b hb hab
+
+-- With enough layers, a trace is exactly ordinary wire evaluation.
+theorem trace_complete {n : ℕ} (C : Circuit) (ao : IsAO2 n C) (x : Fin n → Bool)
+    (k : ℕ) (hk : k ≤ C.gates.length) :
+    ∀ w < n+k, ∀ d ≥ k, trace C x w d = true ↔ fires C w x := by
+  induction k with
+  | zero =>
+    intro w hw d _
+    have hw' : w < n := by omega
+    let i : Fin n := ⟨w,hw'⟩
+    rw [trace]
+    simpa [hw',i] using (fires_input C i x).symm
+  | succ j ih =>
+    intro w hw d hd
+    by_cases old : w < n+j
+    · exact ih (by omega) w old d (by omega)
+    · have eq : w = n+j := by omega
+      subst w
+      have hj : j < C.gates.length := by omega
+      have mem := gateAt_mem hj
+      obtain ⟨p,q,hi⟩ := List.length_eq_two.mp (ao.2.2 _ mem)
+      have hp := ao.2.1 j hj p (by simp [hi])
+      have hq := ao.2.1 j hj q (by simp [hi])
+      have sem := fires_gate C hj hi hp hq x
+      cases d with
+      | zero => omega
+      | succ m =>
+        rcases ao.1 _ mem with ha | ho
+        · rw [trace_at_gate _ hi hp hq, ha]
+          simp only [Bool.and_eq_true,ih (by omega) p hp m (by omega),
+            ih (by omega) q hq m (by omega)]
+          exact (sem.1 ha).symm
+        · rw [trace_at_gate _ hi hp hq, ho]
+          simp only [Bool.or_eq_true,ih (by omega) p hp (m+1) (by omega),
+            ih (by omega) q hq (m+1) (by omega)]
+          exact (sem.2 ho).symm
+
+def Covered {n : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj] (C : Circuit)
+    (D : ℕ) (e : Sym2 (Fin n)) : Prop :=
+  ∀ u v : Fin n, e = s(u,v) → ∃ w < n+C.gates.length, ∃ d ≤ D,
+    trace C (pairInput u v) w d = true ∧
+    (∀ x, fires C w x → graphFun G ∅ x = true)
+
+noncomputable def residual {n : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj]
+    (C : Circuit) (D : ℕ) : Finset (Sym2 (Fin n)) := by
+  classical
+  exact (Ustar G C).filter (fun e => ¬ Covered G C D e)
+
+theorem residual_bound {n D : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj]
+    (h4 : NoFourCycle G) (C : Circuit) (ao : IsAO2 n C) :
+    (Ustar G C).card ≤ (residual G C D).card + C.size * ((D+1) * cost D) := by
+  classical
+  let S := (Ustar G C).filter (Covered G C D)
+  have bound : S.card ≤ C.size * ((D+1)*cost D) :=
+    trace_union G h4 C ao S (fun u v he => (Finset.mem_filter.mp he).2 u v rfl)
+  have part := Finset.card_filter_add_card_filter_not (s := Ustar G C) (p := Covered G C D)
+  change (Ustar G C).card ≤ ((Ustar G C).filter (fun e => ¬ Covered G C D e)).card + _
+  dsimp [S] at bound
+  omega
 
 end VerifiedResults.Depth1735
 
