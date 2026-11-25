@@ -27,20 +27,23 @@ private theorem room {D a b : ℕ} (h : a < b) :
 variable {D : ℕ}
 
 def DepthCatches (D : ℕ) {n : ℕ} (G : SimpleGraph (Fin n)) (C : Circuit) (w d : ℕ)
-    (B : Finset (Sym2 (Fin n))) (R : Finset (Finset (Fin n))) : Prop :=
-  ∀ u v : Fin n, s(u, v) ∉ B → fires C w (pairInput u v) →
+    (B : Finset (Sym2 (Fin n))) (R : Finset (Finset (Fin n)))
+    (hit : Fin n → Fin n → Prop := fun u v => fires C w (pairInput u v)) : Prop :=
+  ∀ u v : Fin n, s(u, v) ∉ B → hit u v →
     ∀ S : Finset (Fin n), S.card + width D * d ≤ contexts D → Apart (away G s(u, v)) {u, v} S →
       ∃ W ∈ R, Apart (away G s(u, v)) W S
 
 def DepthSummary (D : ℕ) {n : ℕ} (G : SimpleGraph (Fin n)) (C : Circuit) (w d : ℕ)
-    (B : Finset (Sym2 (Fin n))) (R : Finset (Finset (Fin n))) : Prop :=
-  R.card ≤ (reps D) ∧ Facts G C w d R ∧ DepthCatches D G C w d B R
+    (B : Finset (Sym2 (Fin n))) (R : Finset (Finset (Fin n)))
+    (hit : Fin n → Fin n → Prop := fun u v => fires C w (pairInput u v)) : Prop :=
+  R.card ≤ (reps D) ∧ Facts G C w d R ∧ DepthCatches D G C w d B R hit
 
 lemma depth_small_power {d : ℕ} (hd : d ≤ D) : 2 ^ d ≤ width D := Nat.pow_le_pow_right (by decide) (Nat.le_succ_of_le hd)
 
 lemma depth_summary_mono {n : ℕ} {G : SimpleGraph (Fin n)} {C : Circuit} {w d : ℕ}
     {B B' : Finset (Sym2 (Fin n))} {R : Finset (Finset (Fin n))}
-    (h : DepthSummary D G C w d B R) (hsub : B ⊆ B') : DepthSummary D G C w d B' R :=
+    {hit : Fin n → Fin n → Prop} (h : DepthSummary D G C w d B R hit) (hsub : B ⊆ B') :
+    DepthSummary D G C w d B' R hit :=
   ⟨h.1, h.2.1, fun u v he => h.2.2 u v (fun hin => he (hsub hin))⟩
 
 lemma depth_input_summary {n : ℕ} (G : SimpleGraph (Fin n)) (C : Circuit) (i : Fin n)
@@ -66,20 +69,22 @@ lemma depth_input_summary {n : ℕ} (G : SimpleGraph (Fin n)) (C : Circuit) (i :
 lemma depth_compress {n : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj] (h4 : NoFourCycle G)
     (C : Circuit) {w d : ℕ} (hd : d ≤ D) {pool : Finset (Fin n)} {A : Finset (Finset (Fin n))}
     {B : Finset (Sym2 (Fin n))} (hD : ∀ W ∈ A, W ⊆ pool) (hc : charge G pool ⊆ B)
-    (hf : Facts G C w d A) (ht : DepthCatches D G C w d B A) :
-    ∃ R, DepthSummary D G C w d B R := by
+    {hit : Fin n → Fin n → Prop} (hf : Facts G C w d A) (ht : DepthCatches D G C w d B A hit) :
+    ∃ R, DepthSummary D G C w d B R hit := by
   obtain ⟨R, hr, hb⟩ := representatives G h4 (width D) (contexts D) A (fun W hW => (hf W hW).1.trans (depth_small_power hd))
   refine ⟨R, hb, fun W hW => hf W (hr.1 hW), ?_⟩
   intro u v he hfire S hs hS
   obtain ⟨W, hW, hwS⟩ := ht u v he hfire S hs hS
   exact transfer_rep G (fun h => he (hc h)) hr hD (by omega) hW hwS
 
-lemma depth_or_summary {n : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj] (h4 : NoFourCycle G)
+lemma depth_or_summary_for {n : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj] (h4 : NoFourCycle G)
     (C : Circuit) {p q w dp dq d : ℕ} (hd : d ≤ D) (hp : dp ≤ d) (hq : dq ≤ d)
     (sem : ∀ x : Fin n → Bool, fires C w x ↔ fires C p x ∨ fires C q x)
     {B : Finset (Sym2 (Fin n))} {P Q : Finset (Finset (Fin n))}
-    (hP : DepthSummary D G C p dp B P) (hQ : DepthSummary D G C q dq B Q) :
-    ∃ R, DepthSummary D G C w d (B ∪ charge G (vertices P ∪ vertices Q)) R := by
+    {pairP pairQ pairW : Fin n → Fin n → Prop}
+    (split : ∀ u v, pairW u v → pairP u v ∨ pairQ u v)
+    (hP : DepthSummary D G C p dp B P pairP) (hQ : DepthSummary D G C q dq B Q pairQ) :
+    ∃ R, DepthSummary D G C w d (B ∪ charge G (vertices P ∪ vertices Q)) R pairW := by
   let pool := vertices P ∪ vertices Q
   apply depth_compress G h4 C hd (pool := pool) (A := P ∪ Q) _ (Finset.subset_union_right)
   · intro W hW
@@ -92,7 +97,7 @@ lemma depth_or_summary {n : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj] 
         fun x hx => (sem x).mpr (Or.inr (hf x hx))⟩
   · intro u v he hx S hs hS
     have he' : s(u, v) ∉ B := fun h => he (Finset.mem_union_left _ h)
-    rcases (sem _).mp hx with h | h
+    rcases split u v hx with h | h
     · obtain ⟨W, hw, ha⟩ := hP.2.2 u v he' h S (by have := Nat.mul_le_mul_left (width D) hp; omega) hS
       exact ⟨W, Finset.mem_union_left _ hw, ha⟩
     · obtain ⟨W, hw, ha⟩ := hQ.2.2 u v he' h S (by have := Nat.mul_le_mul_left (width D) hq; omega) hS
@@ -102,12 +107,22 @@ lemma depth_or_summary {n : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj] 
     · exact (subset_vertices h).trans Finset.subset_union_left
     · exact (subset_vertices h).trans Finset.subset_union_right
 
-lemma depth_and_summary {n : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj] (h4 : NoFourCycle G)
+lemma depth_or_summary {n : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj] (h4 : NoFourCycle G)
+    (C : Circuit) {p q w dp dq d : ℕ} (hd : d ≤ D) (hp : dp ≤ d) (hq : dq ≤ d)
+    (sem : ∀ x : Fin n → Bool, fires C w x ↔ fires C p x ∨ fires C q x)
+    {B : Finset (Sym2 (Fin n))} {P Q : Finset (Finset (Fin n))}
+    (hP : DepthSummary D G C p dp B P) (hQ : DepthSummary D G C q dq B Q) :
+    ∃ R, DepthSummary D G C w d (B ∪ charge G (vertices P ∪ vertices Q)) R :=
+  depth_or_summary_for G h4 C hd hp hq sem (fun u v => (sem (pairInput u v)).mp) hP hQ
+
+lemma depth_and_summary_for {n : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj] (h4 : NoFourCycle G)
     (C : Circuit) {p q w dp dq d : ℕ} (hd : d ≤ D) (hp : dp < d) (hq : dq < d)
     (sem : ∀ x : Fin n → Bool, fires C w x ↔ fires C p x ∧ fires C q x)
     {B : Finset (Sym2 (Fin n))} {P Q : Finset (Finset (Fin n))}
-    (hP : DepthSummary D G C p dp B P) (hQ : DepthSummary D G C q dq B Q) :
-    ∃ R, DepthSummary D G C w d (B ∪ charge G (vertices P ∪ vertices Q)) R := by
+    {pairP pairQ pairW : Fin n → Fin n → Prop}
+    (split : ∀ u v, pairW u v → pairP u v ∧ pairQ u v)
+    (hP : DepthSummary D G C p dp B P pairP) (hQ : DepthSummary D G C q dq B Q pairQ) :
+    ∃ R, DepthSummary D G C w d (B ∪ charge G (vertices P ∪ vertices Q)) R pairW := by
   classical
   let pool := vertices P ∪ vertices Q
   let raw := P.biUnion fun U => Q.image (fun V => U ∪ V)
@@ -135,7 +150,7 @@ lemma depth_and_summary {n : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj]
     let E := away G e
     have heB : e ∉ B := fun h => he (Finset.mem_union_left _ h)
     have heD : e ∉ charge G pool := fun h => he (Finset.mem_union_right _ h)
-    obtain ⟨hpf, hqf⟩ := (sem _).mp hx
+    obtain ⟨hpf, hqf⟩ := split u v hx
     have hpairs : ({u, v} : Finset (Fin n)).card ≤ 2 := Finset.card_le_two
     have hs₁ : (S ∪ {u, v}).card + width D * dp ≤ contexts D := by
       have hh := Finset.card_union_le S {u, v}
@@ -164,10 +179,19 @@ lemma depth_and_summary {n : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj]
       apart_union_left.mpr ⟨huS, hvS⟩⟩
     exact recover_independent G heD (inD U V hu hv) hi
 
+lemma depth_and_summary {n : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj] (h4 : NoFourCycle G)
+    (C : Circuit) {p q w dp dq d : ℕ} (hd : d ≤ D) (hp : dp < d) (hq : dq < d)
+    (sem : ∀ x : Fin n → Bool, fires C w x ↔ fires C p x ∧ fires C q x)
+    {B : Finset (Sym2 (Fin n))} {P Q : Finset (Finset (Fin n))}
+    (hP : DepthSummary D G C p dp B P) (hQ : DepthSummary D G C q dq B Q) :
+    ∃ R, DepthSummary D G C w d (B ∪ charge G (vertices P ∪ vertices Q)) R :=
+  depth_and_summary_for G h4 C hd hp hq sem (fun u v => (sem (pairInput u v)).mp) hP hQ
+
 lemma depth_stage_cost {n : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj] (h4 : NoFourCycle G)
     (C : Circuit) {p q dp dq : ℕ} (hp : dp ≤ D) (hq : dq ≤ D)
     {B : Finset (Sym2 (Fin n))} {P Q : Finset (Finset (Fin n))}
-    (hP : DepthSummary D G C p dp B P) (hQ : DepthSummary D G C q dq B Q) :
+    {pairP pairQ : Fin n → Fin n → Prop}
+    (hP : DepthSummary D G C p dp B P pairP) (hQ : DepthSummary D G C q dq B Q pairQ) :
     (charge G (vertices P ∪ vertices Q)).card ≤ (cost D) := by
   apply charge_bound G h4 _ (2 * (reps D * width D))
   have sizeP := (vertices_bound P (width D) (fun W hW => (hP.2.1 W hW).1.trans (depth_small_power hp))).trans
@@ -295,6 +319,135 @@ theorem shallow_wire_union {n D : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G
     obtain ⟨R,hr⟩ := summaries w hw hd
     have roomLeft := Nat.mul_le_mul_left (width D) hd
     obtain ⟨W,hW,_⟩ := hr.2.2 u v hu hfire ∅
+      (by simpa only [Finset.card_empty,zero_add,contexts] using roomLeft) (by simp [Apart])
+    obtain ⟨_,hi,force⟩ := hr.2.1 W hW
+    let x (i : Fin n) := decide (i ∈ W)
+    have yes := sound x (force x (by simp [x]))
+    simp only [graphFun, Finset.notMem_empty, false_and, exists_false, decide_false,
+      Bool.false_or, decide_eq_true_eq, x] at yes
+    obtain ⟨a,b,hab,ha,hb⟩ := yes
+    exact hi a ha b hb hab
+
+-- OR chooses a true operand. AND must justify both operands, each with
+-- one fewer AND layer available. The rest of the circuit can be arbitrarily deep.
+def trace {n : ℕ} (C : Circuit) (x : Fin n → Bool) (w d : ℕ) : Bool :=
+  if h : w < n then x ⟨w,h⟩ else
+    let g := gateAt C (w - n)
+    match g.inputs with
+    | [p,q] =>
+      if _hp : p < w then
+        if _hq : q < w then
+          match g.op, d with
+          | .or, k => trace C x p k || trace C x q k
+          | .and, k+1 => trace C x p k && trace C x q k
+          | _, _ => false
+        else false
+      else false
+    | _ => false
+termination_by w
+
+private theorem trace_at_gate {n j p q d : ℕ} {C : Circuit} (x : Fin n → Bool)
+    (hi : (gateAt C j).inputs = [p,q]) (hp : p < n+j) (hq : q < n+j) :
+    trace C x (n+j) d = match (gateAt C j).op, d with
+      | .or,k => trace C x p k || trace C x q k
+      | .and,k+1 => trace C x p k && trace C x q k
+      | _, _ => false := by
+  rw [trace]
+  simp [show ¬ n+j < n by omega, hi,hp,hq]
+
+theorem trace_prefix {n D : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj]
+    (h4 : NoFourCycle G) (C : Circuit) (ao : IsAO2 n C) (k : ℕ) (hk : k ≤ C.gates.length) :
+    ∃ B : Finset (Sym2 (Fin n)), B.card ≤ k * ((D+1) * cost D) ∧
+      ∀ w < n+k, ∀ d ≤ D, ∃ R, DepthSummary D G C w d B R
+        (fun u v => trace C (pairInput u v) w d = true) := by
+  classical
+  induction k with
+  | zero =>
+    refine ⟨∅,by simp,?_⟩
+    intro w hw d _
+    let i : Fin n := ⟨w,by omega⟩
+    have h := depth_input_summary (D := D) G C i d ∅
+    refine ⟨_,h.1,h.2.1,?_⟩
+    intro u v he hit
+    apply h.2.2 u v he
+    apply (fires_input ..).mpr
+    rw [trace] at hit
+    simpa [i,show w < n by omega] using hit
+  | succ j ih =>
+    have hj : j < C.gates.length := by omega
+    obtain ⟨B,hB,prev⟩ := ih (by omega)
+    have mem := gateAt_mem hj
+    obtain ⟨p,q,hi⟩ := List.length_eq_two.mp (ao.2.2 _ mem)
+    have hp := ao.2.1 j hj p (by simp [hi])
+    have hq := ao.2.1 j hj q (by simp [hi])
+    have sem := fires_gate C hj hi hp hq
+    have perLevel (d : Fin (D+1)) : ∃ (E : Finset (Sym2 (Fin n))) (R : Finset (Finset (Fin n))),
+        E.card ≤ cost D ∧ DepthSummary D G C (n+j) d (B ∪ E) R
+          (fun u v => trace C (pairInput u v) (n+j) d = true) := by
+      have hd : d.val ≤ D := by omega
+      rcases ao.1 _ mem with ha | ho
+      · cases eq : d.val with
+        | zero =>
+          refine ⟨∅,∅,by simp,by simp,by simp [Facts],?_⟩
+          intro u v _ hit
+          simpa [trace_at_gate _ hi hp hq,ha,eq] using hit
+        | succ m =>
+          have hm : m ≤ D := by omega
+          obtain ⟨P,hP⟩ := prev p hp m hm
+          obtain ⟨Q,hQ⟩ := prev q hq m hm
+          let E := charge G (vertices P ∪ vertices Q)
+          have eBound := depth_stage_cost G h4 C hm hm hP hQ
+          obtain ⟨R,hR⟩ := depth_and_summary_for G h4 C (by omega : m+1 ≤ D)
+            (by omega : m < m+1) (by omega : m < m+1) (fun x => (sem x).1 ha)
+            (pairW := fun u v => trace C (pairInput u v) (n+j) (m+1) = true)
+            (fun u v h => by simpa [trace_at_gate _ hi hp hq,ha] using h) hP hQ
+          exact ⟨E,R,eBound,hR⟩
+      · obtain ⟨P,hP⟩ := prev p hp d hd
+        obtain ⟨Q,hQ⟩ := prev q hq d hd
+        have eBound := depth_stage_cost G h4 C hd hd hP hQ
+        obtain ⟨R,hR⟩ := depth_or_summary_for G h4 C hd le_rfl le_rfl (fun x => (sem x).2 ho)
+          (pairW := fun u v => trace C (pairInput u v) (n+j) d = true)
+          (fun u v h => by simpa [trace_at_gate _ hi hp hq,ho] using h) hP hQ
+        exact ⟨_,R,eBound,hR⟩
+    choose E R eBound hR using perLevel
+    let extra := Finset.univ.biUnion E
+    have extraBound : extra.card ≤ (D+1)*cost D := by
+      calc
+        _ ≤ ∑ d, (E d).card := Finset.card_biUnion_le
+        _ ≤ ∑ _d : Fin (D+1), cost D := Finset.sum_le_sum (fun d _ => eBound d)
+        _ = _ := by simp
+    refine ⟨B ∪ extra,?_,?_⟩
+    · rw [Nat.succ_mul]
+      exact (Finset.card_union_le ..).trans (Nat.add_le_add hB extraBound)
+    · intro w hw d hd
+      by_cases old : w < n+j
+      · obtain ⟨T,hT⟩ := prev w old d hd
+        exact ⟨T,depth_summary_mono hT Finset.subset_union_left⟩
+      · have eq : w = n+j := by omega
+        subst w
+        let l : Fin (D+1) := ⟨d,by omega⟩
+        exact ⟨R l,depth_summary_mono (hR l) (Finset.union_subset_union_right
+          (Finset.subset_biUnion_of_mem E (Finset.mem_univ l)))⟩
+
+-- Each counted edge may choose a different wire and a different certificate.
+-- Only the successful OR branch counts toward the certificate's AND depth.
+theorem trace_union {n D : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj]
+    (h4 : NoFourCycle G) (C : Circuit) (ao : IsAO2 n C) (U : Finset (Sym2 (Fin n)))
+    (hit : ∀ u v : Fin n, s(u, v) ∈ U → ∃ w < n+C.gates.length, ∃ d ≤ D,
+      trace C (pairInput u v) w d = true ∧
+      (∀ x, fires C w x → graphFun G ∅ x = true)) :
+    U.card ≤ C.size * ((D+1) * cost D) := by
+  obtain ⟨B,hB,summaries⟩ := trace_prefix (D := D) G h4 C ao C.gates.length le_rfl
+  refine (Finset.card_le_card (show U ⊆ B from ?_)).trans hB
+  intro e
+  induction e using Sym2.ind with
+  | _ u v =>
+    intro he
+    by_contra hu
+    obtain ⟨w,hw,d,hd,hitTrace,sound⟩ := hit u v he
+    obtain ⟨R,hr⟩ := summaries w hw d hd
+    have roomLeft := Nat.mul_le_mul_left (width D) hd
+    obtain ⟨W,hW,_⟩ := hr.2.2 u v hu hitTrace ∅
       (by simpa only [Finset.card_empty,zero_add,contexts] using roomLeft) (by simp [Apart])
     obtain ⟨_,hi,force⟩ := hr.2.1 W hW
     let x (i : Fin n) := decide (i ∈ W)
