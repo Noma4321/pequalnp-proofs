@@ -5,7 +5,7 @@ is +/- B^(121-j^2), so different terms dominate at different positive inputs.
 The distinct nonempty supports guarantee linear independence.
 """
 
-from itertools import product
+from itertools import combinations, product
 from fractions import Fraction
 from math import comb, lcm
 from random import Random
@@ -16,13 +16,14 @@ def variations(seq):
     return sum(a != b for a, b in zip(signs, signs[1:]))
 
 
-def positive_count(coeff):
+def positive_bounds(coeff):
     # With t=x/(1+x), (1-t)^d P(t/(1-t)) has Bernstein coefficients
     # coeff[i]/binom(d,i). Clear their denominators with a positive scale.
     d = len(coeff) - 1
     scale = lcm(*(comb(d, i) for i in range(d + 1)))
     stack = [([v * (scale // comb(d, i)) for i, v in enumerate(coeff)], 0)]
     count = 0
+    pending = 0
     while stack:
         b, depth = stack.pop()
         v = variations(b)
@@ -30,7 +31,11 @@ def positive_count(coeff):
             count += v
             continue
         if depth >= 256:
-            raise ArithmeticError("unresolved interval")
+            # Strictly interior zeros counted with multiplicity cannot exceed
+            # the variation. An odd variation guarantees at least one.
+            count += v % 2
+            pending += v - v % 2
+            continue
         # De Casteljau at 1/2. Each child has the common scale 2^d.
         left, right = [], []
         for k in range(d + 1):
@@ -39,7 +44,14 @@ def positive_count(coeff):
             b = [a + c for a, c in zip(b, b[1:])]
         count += int(left[-1] == 0)
         stack.extend(((left, depth + 1), (right[::-1], depth + 1)))
-    return count
+    return count, count + pending
+
+
+def positive_count(coeff):
+    lower, upper = positive_bounds(coeff)
+    if lower != upper:
+        raise ArithmeticError("unresolved interval")
+    return lower
 
 
 def expand(order, signs, base):
@@ -89,5 +101,29 @@ def main():
     print("Explicit triple: 21 disjoint sign changes; exact positive-root count 21")
 
 
+def all_partitions():
+    # Unlabelled partitions of 0..11 into three four-element supports.
+    # Fixing the smallest remaining element in each block picks one ordering.
+    universe = set(range(12))
+    signs = [(-1)**j for j in range(12)]
+    total = 0
+    largest_lower = largest_upper = 0
+    for first_tail in combinations(range(1, 12), 3):
+        first = (0,) + first_tail
+        remaining = sorted(universe.difference(first))
+        for second_tail in combinations(remaining[1:], 3):
+            second = (remaining[0],) + second_tail
+            third = sorted(set(remaining).difference(second))
+            order = list(first + second) + third
+            lower, upper = positive_bounds(expand(order, signs, 4))
+            largest_lower = max(lower, largest_lower)
+            largest_upper = max(upper, largest_upper)
+            total += 1
+    assert total == 5775
+    print(f"All {total} support partitions, fixed coefficients: "
+          f"maximum lies in [{largest_lower}, {largest_upper}]")
+
+
 if __name__ == "__main__":
     main()
+    all_partitions()
