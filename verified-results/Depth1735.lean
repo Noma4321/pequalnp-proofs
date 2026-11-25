@@ -178,46 +178,69 @@ lemma depth_stage_cost {n : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj] 
   omega
 
 -- Go through the gates in order, retaining one common set of charged edges.
-lemma depth_prefix_summaries {n : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj]
-    (h4 : NoFourCycle G) (C : Circuit) (hAO : IsAO2 n C) (r : ℕ → ℕ) (layer : Layered (n := n) C D r)
+def Graded (n : ℕ) (C : Circuit) (r : ℕ → ℕ) : Prop :=
+  ∀ j < C.gates.length, ∀ w ∈ (gateAt C j).inputs,
+    r w ≤ r (n + j) ∧ ((gateAt C j).op = GateOp.and → r w < r (n + j))
+
+lemma shallow_prefix {n : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj]
+    (h4 : NoFourCycle G) (C : Circuit) (hAO : IsAO2 n C) (r : ℕ → ℕ) (rankStep : Graded n C r)
     (k : ℕ) (hk : k ≤ C.gates.length) :
     ∃ B : Finset (Sym2 (Fin n)), B.card ≤ k * (cost D) ∧
-      ∀ w < n + k, ∃ R, DepthSummary D G C w (r w) B R := by
+      ∀ w < n + k, r w ≤ D → ∃ R, DepthSummary D G C w (r w) B R := by
   induction k with
   | zero =>
     refine ⟨∅, by simp, ?_⟩
-    intro w hw
+    intro w hw _
     let i : Fin n := ⟨w, by omega⟩
     exact ⟨_, depth_input_summary G C i _ _⟩
   | succ j ih =>
     have hj : j < C.gates.length := by omega
     obtain ⟨B, hB, prev⟩ := ih (by omega)
-    have hmem := gateAt_mem hj
-    obtain ⟨p, q, hin⟩ := List.length_eq_two.mp (hAO.2.2 _ hmem)
-    have hpin : p ∈ (gateAt C j).inputs := by simp [hin]
-    have hqin : q ∈ (gateAt C j).inputs := by simp [hin]
-    have hp := hAO.2.1 j hj p hpin
-    have hq := hAO.2.1 j hj q hqin
-    obtain ⟨P, hP⟩ := prev p hp
-    obtain ⟨Q, hQ⟩ := prev q hq
-    let B' := B ∪ charge G (vertices P ∪ vertices Q)
-    have step : ∃ R, DepthSummary D G C (n + j) (r (n + j)) B' R := by
-      have sem := fires_gate C hj hin hp hq
-      rcases hAO.1 _ hmem with ha | ho
-      · exact depth_and_summary G h4 C (layer.1 _) ((layer.2 j hj p hpin).2 ha)
-          ((layer.2 j hj q hqin).2 ha) (fun x => (sem x).1 ha) hP hQ
-      · exact depth_or_summary G h4 C (layer.1 _) (layer.2 j hj p hpin).1
-          (layer.2 j hj q hqin).1 (fun x => (sem x).2 ho) hP hQ
-    refine ⟨B', ?_, ?_⟩
-    · rw [Nat.succ_mul]
-      exact (Finset.card_union_le ..).trans
-        (Nat.add_le_add hB (depth_stage_cost G h4 C (layer.1 _) (layer.1 _) hP hQ))
-    · intro w hw
-      by_cases hold : w < n + j
-      · obtain ⟨R, hr⟩ := prev w hold
-        exact ⟨R, depth_summary_mono hr Finset.subset_union_left⟩
-      · have he : w = n + j := by omega
-        exact he ▸ step
+    by_cases shallow : r (n + j) ≤ D
+    · have hmem := gateAt_mem hj
+      obtain ⟨p, q, hin⟩ := List.length_eq_two.mp (hAO.2.2 _ hmem)
+      have hpin : p ∈ (gateAt C j).inputs := by simp [hin]
+      have hqin : q ∈ (gateAt C j).inputs := by simp [hin]
+      have hp := hAO.2.1 j hj p hpin
+      have hq := hAO.2.1 j hj q hqin
+      have hpD := (rankStep j hj p hpin).1.trans shallow
+      have hqD := (rankStep j hj q hqin).1.trans shallow
+      obtain ⟨P, hP⟩ := prev p hp hpD
+      obtain ⟨Q, hQ⟩ := prev q hq hqD
+      let B' := B ∪ charge G (vertices P ∪ vertices Q)
+      have step : ∃ R, DepthSummary D G C (n + j) (r (n + j)) B' R := by
+        have sem := fires_gate C hj hin hp hq
+        rcases hAO.1 _ hmem with ha | ho
+        · exact depth_and_summary G h4 C shallow ((rankStep j hj p hpin).2 ha)
+            ((rankStep j hj q hqin).2 ha) (fun x => (sem x).1 ha) hP hQ
+        · exact depth_or_summary G h4 C shallow (rankStep j hj p hpin).1
+            (rankStep j hj q hqin).1 (fun x => (sem x).2 ho) hP hQ
+      refine ⟨B', ?_, ?_⟩
+      · rw [Nat.succ_mul]
+        exact (Finset.card_union_le ..).trans
+          (Nat.add_le_add hB (depth_stage_cost G h4 C hpD hqD hP hQ))
+      · intro w hw hd
+        by_cases hold : w < n + j
+        · obtain ⟨R, hr⟩ := prev w hold hd
+          exact ⟨R, depth_summary_mono hr Finset.subset_union_left⟩
+        · have he : w = n + j := by omega
+          exact he ▸ step
+    · refine ⟨B, hB.trans (Nat.mul_le_mul_right _ (by omega)), ?_⟩
+      intro w hw hd
+      have early : w < n + j := by
+        by_contra bad
+        have eq : w = n + j := by omega
+        exact shallow (eq ▸ hd)
+      exact prev w early hd
+
+
+lemma depth_prefix_summaries {n : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj]
+    (h4 : NoFourCycle G) (C : Circuit) (hAO : IsAO2 n C) (r : ℕ → ℕ) (layer : Layered (n := n) C D r)
+    (k : ℕ) (hk : k ≤ C.gates.length) :
+    ∃ B : Finset (Sym2 (Fin n)), B.card ≤ k * (cost D) ∧
+      ∀ w < n + k, ∃ R, DepthSummary D G C w (r w) B R := by
+  obtain ⟨B,hB,hAll⟩ := shallow_prefix (D := D) G h4 C hAO r layer.2 k hk
+  exact ⟨B,hB,fun w hw => hAll w hw (layer.1 w)⟩
 
 -- At the output an uncharged edge would produce an independent certificate
 -- forcing the graph function. Turning on just those vertices contradicts it.
@@ -252,6 +275,34 @@ lemma depth_edge_bound {n : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj] 
     obtain ⟨a, b, hab, ha, hb⟩ := yes
     exact hi a ha b hb hab
 
+
+-- Count the union over all shallow wires that never fire on an independent input.
+-- Deep gates elsewhere in the circuit impose no depth restriction on this result.
+theorem shallow_wire_union {n D : ℕ} (G : SimpleGraph (Fin n)) [DecidableRel G.Adj]
+    (h4 : NoFourCycle G) (C : Circuit) (hAO : IsAO2 n C) (r : ℕ → ℕ)
+    (rankStep : Graded n C r) (U : Finset (Sym2 (Fin n)))
+    (hit : ∀ u v : Fin n, s(u, v) ∈ U → ∃ w < n + C.gates.length, r w ≤ D ∧
+      fires C w (pairInput u v) ∧ (∀ x, fires C w x → graphFun G ∅ x = true)) :
+    U.card ≤ C.size * cost D := by
+  obtain ⟨B,hB,summaries⟩ := shallow_prefix (D := D) G h4 C hAO r rankStep C.gates.length le_rfl
+  refine (Finset.card_le_card (show U ⊆ B from ?_)).trans hB
+  intro e
+  induction e using Sym2.ind with
+  | _ u v =>
+    intro he
+    by_contra hu
+    obtain ⟨w,hw,hd,hfire,sound⟩ := hit u v he
+    obtain ⟨R,hr⟩ := summaries w hw hd
+    have roomLeft := Nat.mul_le_mul_left (width D) hd
+    obtain ⟨W,hW,_⟩ := hr.2.2 u v hu hfire ∅
+      (by simpa only [Finset.card_empty,zero_add,contexts] using roomLeft) (by simp [Apart])
+    obtain ⟨_,hi,force⟩ := hr.2.1 W hW
+    let x (i : Fin n) := decide (i ∈ W)
+    have yes := sound x (force x (by simp [x]))
+    simp only [graphFun, Finset.notMem_empty, false_and, exists_false, decide_false,
+      Bool.false_or, decide_eq_true_eq, x] at yes
+    obtain ⟨a,b,hab,ha,hb⟩ := yes
+    exact hi a ha b hb hab
 
 end VerifiedResults.Depth1735
 
