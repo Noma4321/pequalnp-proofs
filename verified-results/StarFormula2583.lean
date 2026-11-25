@@ -170,4 +170,60 @@ theorem circuit_ao2 (t : Tree (Fin n)) : PEqualNP.TopForm.IsAO2 n (circuit t) :=
   rw [List.getD_eq_getElem _ _ hj] at hi
   exact hi
 
+private def step (w : List Bool) (g : Gate) :=
+  w ++ [g.op.eval (g.inputs.map fun i => w.getD i false)]
+
+private theorem run_ext (gs : List Gate) (w : List Bool) :
+    ∃ s, gs.foldl step w = w ++ s ∧ s.length = gs.length := by
+  induction gs generalizing w with
+  | nil => exact ⟨[], by simp, rfl⟩
+  | cons g gs ih =>
+    obtain ⟨s, eq, len⟩ := ih (step w g)
+    exact ⟨_ :: s, by simpa [step, List.append_assoc] using eq, by simp [len]⟩
+
+private theorem keep (w s : List Bool) (i : Nat) (h : i < w.length) :
+    (w ++ s).getD i false = w.getD i false := by
+  simp [List.getElem?_append_left h]
+
+private theorem last_step (w : List Bool) (g : Gate) :
+    (step w g).getD w.length false = g.op.eval (g.inputs.map fun i => w.getD i false) := by
+  simp [step]
+
+private theorem run_value (x : Fin n → Bool) (t : Tree (Fin n)) (w : List Bool)
+    (base : Nat) (len : w.length = base) (enough : n ≤ base)
+    (inputs : ∀ i : Fin n, w.getD i.val false = x i) :
+    ((emit base t).foldl step w).getD (rootWire base t) false = eval x t := by
+  induction t generalizing w base with
+  | input i => exact inputs i
+  | either a b ha hb | both a b ha hb =>
+    let wa := (emit base a).foldl step w
+    let wb := (emit (base + cost a) b).foldl step wa
+    obtain ⟨sa, ea, la⟩ := run_ext (emit base a) w
+    obtain ⟨sb, eb, lb⟩ := run_ext (emit (base + cost a) b) wa
+    change wa = w ++ sa at ea
+    change wb = wa ++ sb at eb
+    have lena : wa.length = base + cost a := by rw [ea, List.length_append, la, emit_length, len]
+    have lenb : wb.length = base + cost a + cost b := by rw [eb, List.length_append, lb, emit_length, lena]
+    have va := ha w base len enough inputs
+    change wa.getD _ _ = _ at va
+    have left : wb.getD (rootWire base a) false = eval x a := by
+      rw [eb, keep, va]
+      rw [lena]; exact root_bound a enough
+    have right := hb wa (base + cost a) lena (by omega) (fun i => by
+      rw [ea, keep, inputs]; omega)
+    change wb.getD _ _ = _ at right
+    simp only [emit, List.foldl_append, List.foldl_cons, List.foldl_nil]
+    change (step wb _).getD (base + cost a + cost b) false = _
+    rw [← lenb, last_step]
+    simp only [List.map_cons, List.map_nil, left, right, GateOp.eval, eval,
+      List.any_cons, List.all_cons, List.any_nil, List.all_nil, id_eq,
+      Bool.or_false, Bool.and_true]
+
+theorem circuit_value (x : Fin n → Bool) (t : Tree (Fin n)) :
+    (circuit t).eval (List.ofFn x) = eval x t := by
+  apply run_value x t (List.ofFn x) n (by simp) (Nat.le_refl n)
+  intro i
+  rw [List.getD_eq_getElem _ _ (by simp)]
+  simp
+
 end VerifiedResults.StarFormula
